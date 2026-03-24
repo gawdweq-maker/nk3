@@ -36,7 +36,10 @@ const state = {
   hydrateInFlight: 0,
   hydrationStarted: false,
   disabled: false,
-  bridgeStateVersion: 0
+  bridgeStateVersion: 0,
+  catalogReady: false,
+  pendingBridgeItems: [],
+  pendingBridgeLots: []
 };
 
 const els = {
@@ -196,6 +199,8 @@ async function bootstrapCatalog() {
 
   state.categories = glistData.categories;
   mergeCatalog(glistData.items, dbRows);
+  state.catalogReady = true;
+  applyPendingBridgePatches();
   queueHydrationForMissingNames();
   render();
 
@@ -204,6 +209,20 @@ async function bootstrapCatalog() {
     dbRows: dbRows.length,
     categories: glistData.categories.length
   });
+}
+
+function applyPendingBridgePatches() {
+  if (!state.catalogReady) return;
+
+  if (state.pendingBridgeItems.length) {
+    const items = state.pendingBridgeItems.splice(0, state.pendingBridgeItems.length);
+    applyBridgeItemsPatch(items);
+  }
+
+  if (state.pendingBridgeLots.length) {
+    const lotsPayloads = state.pendingBridgeLots.splice(0, state.pendingBridgeLots.length);
+    lotsPayloads.forEach((payload) => applyBridgeLotsPatch(payload));
+  }
 }
 
 async function loadGlist() {
@@ -507,6 +526,26 @@ function applyBridgeSnapshot(snapshot) {
 
   state.disabled = Boolean(snapshot.disabled);
 
+  if (!state.catalogReady) {
+    if (Array.isArray(snapshot.items)) {
+      state.pendingBridgeItems.push(...snapshot.items);
+    }
+    if (snapshot.lotsByItemId && typeof snapshot.lotsByItemId === 'object') {
+      Object.entries(snapshot.lotsByItemId).forEach(([itemId, lots]) => {
+        state.pendingBridgeLots.push({
+          itemId: Number(itemId),
+          lots
+        });
+      });
+    }
+
+    const selectedItemId = Number(snapshot.selectedItemId);
+    if (Number.isFinite(selectedItemId)) {
+      state.selectedItemId = selectedItemId;
+    }
+    return;
+  }
+
   if (Array.isArray(snapshot.items)) {
     snapshot.items.forEach((item) => {
       mergeIncomingItem(item);
@@ -529,6 +568,10 @@ function applyBridgeSnapshot(snapshot) {
 
 function applyBridgeItemsPatch(items) {
   if (!Array.isArray(items)) return 0;
+  if (!state.catalogReady) {
+    state.pendingBridgeItems.push(...items);
+    return 0;
+  }
 
   let updated = 0;
   items.forEach((item) => {
@@ -543,8 +586,12 @@ function applyBridgeItemsPatch(items) {
 function applyBridgeLotsPatch(payload) {
   const itemId = Number(payload?.itemId);
   if (!Number.isFinite(itemId)) return 0;
+  if (!state.catalogReady) {
+    state.pendingBridgeLots.push(payload);
+    return 0;
+  }
 
-  const normalized = normalizeLots(payload?.lots);
+  const normalized = normalizeLots(payload?.lots).slice(0, LOTS_LIMIT);
   state.lotsByItemId.set(itemId, normalized);
 
   const item = state.itemsById.get(itemId);
@@ -565,8 +612,27 @@ function mergeIncomingItem(rawItem) {
   const itemId = Number(rawItem?.itemId);
   if (!Number.isFinite(itemId)) return false;
 
-  const current = state.itemsById.get(itemId);
-  if (!current) return false;
+  let current = state.itemsById.get(itemId);
+  if (!current) {
+    current = {
+      itemId,
+      category: String(rawItem?.category || 'all'),
+      image: buildImageUrl(itemId),
+      name: '',
+      description: '',
+      price: 1,
+      totalQuantity: 0,
+      updatedAt: '',
+      minPrice: null,
+      maxPrice: null
+    };
+    state.items.push(current);
+    state.itemsById.set(itemId, current);
+    if (!state.categories.includes(current.category)) {
+      state.categories.push(current.category);
+      state.categories.sort();
+    }
+  }
 
   current.category = rawItem.category || current.category;
   current.name = rawItem.name || current.name;
