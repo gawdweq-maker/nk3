@@ -35,7 +35,8 @@ const state = {
   hydrateQueue: [],
   hydrateInFlight: 0,
   hydrationStarted: false,
-  disabled: false
+  disabled: false,
+  bridgeStateVersion: 0
 };
 
 const els = {
@@ -155,10 +156,14 @@ function bindBridge() {
     debug('STATUS', String(text || ''));
   });
 
+  bridge.on('ui:marketplace:bridge', (message) => {
+    applyBridgeMessage(message);
+  });
+
   bridge.on('ui:marketplace:initResult', (...args) => {
     state.lastInitRaw = safeStringify(args);
     const updatedCount = applyInitResultPayload(args);
-    const text = `Сработал подпись такая: marketplace.client.initResult | обновлено предметов: ${updatedCount}`;
+    const text = `Получен marketplace.client.initResult | обновлено предметов: ${updatedCount}`;
     setStatus(text);
     debug('INIT', text, { rawArgs: args });
     render();
@@ -167,7 +172,7 @@ function bindBridge() {
   bridge.on('ui:marketplace:pushLots', (lots) => {
     state.lastLotsRaw = safeStringify(lots);
     const count = applyLotsPayload(lots);
-    const text = `Сработал подпись такая: marketplace.client.trading.pushLots | лотов: ${count}`;
+    const text = `Получен marketplace.client.trading.pushLots | лотов: ${count}`;
     setStatus(text);
     debug('LOTS', text, { rawLots: lots });
     renderDrawer();
@@ -179,6 +184,8 @@ function bindBridge() {
     debug('BRIDGE', 'Получено событие ui:marketplace:scriptDisabled');
     renderMode();
   });
+
+  requestBridgeState();
 }
 
 async function bootstrapCatalog() {
@@ -423,15 +430,159 @@ function startPeriodicSync() {
 }
 
 function requestInitFromGame(statusText) {
-  const bridge = getBridge();
-  if (!bridge?.emit) {
+  if (!canEmitBridge()) {
     setStatus('Bridge недоступен, обновление из alt:V не отправлено');
     return;
   }
 
   setStatus(statusText);
-  debug('BRIDGE', 'emit ui:marketplace:requestInit');
-  bridge.emit('ui:marketplace:requestInit');
+  debug('BRIDGE', 'emit action request:init');
+  sendBridgeAction('request:init', { reason: statusText });
+}
+
+function requestBridgeState() {
+  const bridge = getBridge();
+  if (!bridge?.emit) return;
+  bridge.emit('ui:marketplace:requestState');
+}
+
+function canEmitBridge() {
+  const bridge = getBridge();
+  return Boolean(bridge && typeof bridge.emit === 'function');
+}
+
+function sendBridgeAction(type, payload = {}) {
+  const bridge = getBridge();
+  if (!bridge?.emit) return;
+
+  bridge.emit('ui:marketplace:action', {
+    type,
+    ...payload
+  });
+}
+
+function applyBridgeMessage(message) {
+  if (!message || typeof message !== 'object') {
+    debug('BRIDGE', 'Игнорирую некорректное bridge-сообщение', { message });
+    return;
+  }
+
+  const type = String(message.type || '');
+  const payload = message.payload ?? {};
+  state.bridgeStateVersion += 1;
+
+  if (type === 'state:sync') {
+    applyBridgeSnapshot(payload.state);
+    debug('BRIDGE', 'Получен полный sync state', { reason: payload.reason });
+    render();
+    return;
+  }
+
+  if (type === 'state:items') {
+    const updated = applyBridgeItemsPatch(payload.items);
+    debug('BRIDGE', 'Получен patch предметов', { updated });
+    render();
+    return;
+  }
+
+  if (type === 'state:lots') {
+    const updated = applyBridgeLotsPatch(payload);
+    debug('BRIDGE', 'Получен patch лотов', { itemId: payload.itemId, updated });
+    renderGrid(getVisibleItems());
+    renderDrawer();
+    return;
+  }
+
+  if (type === 'state:selected') {
+    const itemId = Number(payload.itemId);
+    if (Number.isFinite(itemId)) {
+      state.selectedItemId = itemId;
+      render();
+    }
+  }
+}
+
+function applyBridgeSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+
+  state.disabled = Boolean(snapshot.disabled);
+
+  if (Array.isArray(snapshot.items)) {
+    snapshot.items.forEach((item) => {
+      mergeIncomingItem(item);
+    });
+  }
+
+  if (snapshot.lotsByItemId && typeof snapshot.lotsByItemId === 'object') {
+    Object.entries(snapshot.lotsByItemId).forEach(([itemId, lots]) => {
+      const numericItemId = Number(itemId);
+      if (!Number.isFinite(numericItemId) || !Array.isArray(lots)) return;
+      state.lotsByItemId.set(numericItemId, normalizeLots(lots));
+    });
+  }
+
+  const selectedItemId = Number(snapshot.selectedItemId);
+  if (Number.isFinite(selectedItemId)) {
+    state.selectedItemId = selectedItemId;
+  }
+}
+
+function applyBridgeItemsPatch(items) {
+  if (!Array.isArray(items)) return 0;
+
+  let updated = 0;
+  items.forEach((item) => {
+    if (mergeIncomingItem(item)) {
+      updated += 1;
+    }
+  });
+
+  return updated;
+}
+
+function applyBridgeLotsPatch(payload) {
+  const itemId = Number(payload?.itemId);
+  if (!Number.isFinite(itemId)) return 0;
+
+  const normalized = normalizeLots(payload?.lots);
+  state.lotsByItemId.set(itemId, normalized);
+
+  const item = state.itemsById.get(itemId);
+  if (item) {
+    item.totalQuantity = normalized.length || item.totalQuantity;
+    if (normalized.length) {
+      item.minPrice = Math.min(...normalized.map((lot) => normalizePrice(lot.price, item.price)));
+      item.maxPrice = Math.max(...normalized.map((lot) => normalizePrice(lot.price, item.price)));
+      item.price = item.minPrice;
+      item.updatedAt = payload.updatedAt || item.updatedAt;
+    }
+  }
+
+  return normalized.length;
+}
+
+function mergeIncomingItem(rawItem) {
+  const itemId = Number(rawItem?.itemId);
+  if (!Number.isFinite(itemId)) return false;
+
+  const current = state.itemsById.get(itemId);
+  if (!current) return false;
+
+  current.category = rawItem.category || current.category;
+  current.name = rawItem.name || current.name;
+  current.description = rawItem.description || current.description;
+  current.image = rawItem.image || current.image;
+  current.price = normalizePrice(rawItem.price ?? rawItem.startingBet, current.price);
+  current.totalQuantity = Number(rawItem.totalQuantity) || current.totalQuantity || 0;
+  current.minPrice = rawItem.minPrice ?? current.minPrice;
+  current.maxPrice = rawItem.maxPrice ?? current.maxPrice;
+  current.updatedAt = rawItem.updatedAt || current.updatedAt;
+
+  if (current.description) {
+    state.descriptionsByItemId.set(itemId, current.description);
+  }
+
+  return true;
 }
 
 function applyInitResultPayload(args) {
@@ -702,9 +853,17 @@ function renderGrid(items) {
 
 async function openItemDrawer(itemId) {
   state.selectedItemId = itemId;
+  const item = state.itemsById.get(itemId);
+
+  if (item && canEmitBridge()) {
+    sendBridgeAction('select:item', {
+      itemId,
+      itemName: item.name || `#${itemId}`
+    });
+  }
+
   render();
 
-  const item = state.itemsById.get(itemId);
   if (!item || state.disabled) {
     return;
   }
@@ -733,16 +892,18 @@ async function openItemDrawer(itemId) {
 }
 
 function requestLotsFromGame(itemId) {
-  const bridge = getBridge();
-  if (!bridge?.emit) {
+  if (!canEmitBridge()) {
     debug('LOTS', 'Bridge недоступен, запрос лотов пропущен', { itemId });
     return;
   }
 
-  const sortJson = JSON.stringify({ sort: 'priceUp' });
   state.pendingLotsItemId = itemId;
-  debug('BRIDGE', 'emit ui:marketplace:requestLots', { itemId, sortJson });
-  bridge.emit('ui:marketplace:requestLots', itemId, 0, sortJson);
+  debug('BRIDGE', 'emit action request:lots', { itemId, sort: 'priceUp' });
+  sendBridgeAction('request:lots', {
+    itemId,
+    page: 0,
+    sort: { sort: 'priceUp' }
+  });
 }
 
 function renderDrawer() {
@@ -755,7 +916,7 @@ function renderDrawer() {
   const lots = state.lotsByItemId.get(item.itemId) || [];
   const description = state.loadingDescriptionFor === item.itemId
     ? 'Описание загружается...'
-    : state.descriptionsByItemId.get(item.itemId) || 'Описание пока не найдено';
+    : state.descriptionsByItemId.get(item.itemId) || item.description || 'Описание пока не найдено';
   const minPrice = lots.length
     ? Math.min(...lots.map((lot) => normalizePrice(lot.price, item.price)))
     : normalizePrice(item.minPrice, item.price);
@@ -784,6 +945,7 @@ function renderDebug(renderedCount = getVisibleItems().length) {
     const metrics = [
       `mode: ${state.mode}`,
       `bridge: ${state.bridgeConnected}`,
+      `bridgeVersion: ${state.bridgeStateVersion}`,
       `activeTab: ${state.activeTab}`,
       `category: ${state.selectedCategory}`,
       `items: ${state.items.length}`,
