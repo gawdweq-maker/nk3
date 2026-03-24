@@ -3,59 +3,117 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Marketplace Menu</title>
-  <link rel="stylesheet" href="styles.css?v=2" />
+  <title>NK3 Marketplace</title>
+  <link rel="stylesheet" href="styles.css?v=nk3-4" />
 </head>
 <body>
-  <div class="app">
-    <div class="window">
-      <div class="window__header">
-        <div class="window__title">Marketplace Menu</div>
+  <div class="app-shell">
+    <div class="app-backdrop"></div>
 
-        <div class="window__actions">
-          <input
-            id="searchInput"
-            class="search-input"
-            type="text"
-            placeholder="Поиск по названию или ID..."
-          />
-          <button id="refreshButton" class="action-button">Обновить</button>
+    <main class="market">
+      <header class="market__header">
+        <div>
+          <p class="eyebrow">Majestic RP Marketplace</p>
+          <h1 class="market__title">NK3 Trade Board</h1>
         </div>
-      </div>
 
-      <div class="tabs">
-        <button class="tab tab--active" data-tab="favorites">Избраное</button>
-        <button class="tab" data-tab="library">Библиотека</button>
-      </div>
+        <div class="market__header-actions">
+          <label class="search-field">
+            <span class="search-field__icon">⌕</span>
+            <input id="searchInput" type="search" placeholder="Поиск по названию или ID" />
+          </label>
 
-      <div class="content">
-        <div id="statusBar" class="status-bar">Загрузка...</div>
+          <button id="sortButton" class="icon-button" type="button" title="Сортировка">≡</button>
 
-        <div class="workspace">
-          <div class="workspace__main">
-            <div id="favoritesView" class="view view--active">
-              <div id="favoritesGrid" class="items-grid"></div>
-              <div id="favoritesEmpty" class="empty-state">В избраном пока нет предметов</div>
-            </div>
+          <div id="sortMenu" class="sort-menu hidden">
+            <button class="sort-menu__item" type="button" data-sort="cheap">Дешевые</button>
+            <button class="sort-menu__item" type="button" data-sort="expensive">Дорогие</button>
+          </div>
 
-            <div id="libraryView" class="view">
-              <div id="libraryGrid" class="items-grid"></div>
-              <div id="libraryEmpty" class="empty-state">Каталог пуст</div>
+          <button id="refreshButton" class="refresh-button" type="button" title="Обновить цены">↻</button>
+        </div>
+      </header>
+
+      <section class="market__toolbar">
+        <div class="main-tabs">
+          <button class="main-tab main-tab--active" type="button" data-tab="items">Предметы</button>
+          <button class="main-tab" type="button" data-tab="favorites">Избранное</button>
+        </div>
+
+        <div id="categoryBar" class="category-bar"></div>
+      </section>
+
+      <section class="market__status">
+        <div id="statusBar" class="status-bar">Инициализация...</div>
+        <div id="modeBadge" class="mode-badge">WEB</div>
+      </section>
+
+      <section class="market__body">
+        <div class="market__grid-panel">
+          <div id="itemsGrid" class="items-grid"></div>
+          <div id="emptyState" class="empty-state hidden">Предметы не найдены</div>
+        </div>
+
+        <aside id="drawer" class="drawer">
+          <div class="drawer__empty">
+            <div class="drawer__empty-title">Карточка предмета</div>
+            <div class="drawer__empty-text">
+              Выбери предмет слева, чтобы посмотреть описание, цены и последние предложения.
             </div>
           </div>
 
-          <aside class="workspace__logs">
-            <div class="logs__header">
-              <div class="logs__title">Логи</div>
-              <button id="clearLogsButton" class="logs__clear">Очистить</button>
+          <div id="drawerContent" class="drawer__content hidden">
+            <div class="drawer__top">
+              <div>
+                <div id="drawerCategory" class="drawer__category"></div>
+                <h2 id="drawerTitle" class="drawer__title"></h2>
+                <div id="drawerMeta" class="drawer__meta"></div>
+              </div>
+
+              <div class="drawer__art">
+                <img id="drawerImage" alt="" />
+              </div>
             </div>
-            <div id="logsPanel" class="logs__body"></div>
-          </aside>
+
+            <div class="drawer__stats">
+              <div class="stat-card">
+                <div class="stat-card__label">Мин. цена</div>
+                <div id="drawerMinPrice" class="stat-card__value">-</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-card__label">Макс. цена</div>
+                <div id="drawerMaxPrice" class="stat-card__value">-</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-card__label">Лотов</div>
+                <div id="drawerLotsCount" class="stat-card__value">0</div>
+              </div>
+            </div>
+
+            <section class="drawer__section">
+              <div class="drawer__section-title">Описание</div>
+              <div id="drawerDescription" class="drawer__description">Описание загружается...</div>
+            </section>
+
+            <section class="drawer__section">
+              <div class="drawer__section-title">Последние 5 предложений</div>
+              <div id="drawerLots" class="drawer__lots"></div>
+            </section>
+          </div>
+        </aside>
+      </section>
+
+      <section class="market__debug">
+        <div class="debug-panel__header">
+          <div class="debug-panel__title">Debug</div>
+          <button id="clearDebugButton" class="debug-panel__clear" type="button">Очистить</button>
         </div>
-      </div>
-    </div>
+        <div id="debugMetrics" class="debug-metrics"></div>
+        <div id="debugLogs" class="debug-logs"></div>
+      </section>
+    </main>
   </div>
 
-  <script type="module" src="app.js?v=rapid1"></script>
+  <script type="module" src="app.js?v=nk3-4"></script>
 </body>
 </html>
